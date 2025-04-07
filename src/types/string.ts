@@ -12,6 +12,7 @@ export class StringSchema extends Schema<string> {
   private readonly _format?: StringFormat;
   private readonly _trim: boolean = false;
   private readonly _optional: boolean = false;
+  private readonly _default?: string;
   
   constructor(options: StringSchemaOptions = {}) {
     super();
@@ -21,6 +22,7 @@ export class StringSchema extends Schema<string> {
     this._format = options.format;
     this._trim = options.trim || false;
     this._optional = options.optional || false;
+    this._default = options.default;
   }
 
   /**
@@ -54,7 +56,17 @@ export class StringSchema extends Schema<string> {
   }
 
   /**
-   * Specify that string should be trimmed before validation
+   * Set a default value for the string
+   */
+  default(value: string): StringSchema {
+    return new StringSchema({
+      ...this._getOptions(),
+      default: value,
+    });
+  }
+
+  /**
+   * Enable string trimming
    */
   trim(): StringSchema {
     return new StringSchema({
@@ -120,13 +132,19 @@ export class StringSchema extends Schema<string> {
   _parse(data: unknown, options: ValidationOptions): Result<string, ValidationError> {
     const path = options.path || [];
 
+    // Si la valeur est undefined et qu'il y a une valeur par défaut, utilisez-la
+    if (data === undefined && this._default !== undefined) {
+      return ok(this._default);
+    }
+  
     // Type check
     if (typeof data !== 'string') {
       return err(ValidationError.typeMismatch('string', data, path));
     }
 
-    // Apply transformations
     let value = data;
+
+    // Appliquer le trim si demandé
     if (this._trim) {
       value = value.trim();
     }
@@ -136,10 +154,10 @@ export class StringSchema extends Schema<string> {
     // Min length validation
     if (this._minLength !== undefined && value.length < this._minLength) {
       issues.push(this.issue(
-        `String must contain at least ${this._minLength} character(s)`,
-        'string.min_length',
+        `String must have at least ${this._minLength} character(s)`,
+        'string.min',
         path,
-        { minLength: this._minLength, actual: value.length }
+        { min: this._minLength, actual: value.length }
       ));
     }
 
@@ -281,6 +299,7 @@ export interface StringSchemaOptions {
   format?: StringFormat;
   trim?: boolean;
   optional?: boolean;
+  default?: string;
 }
 
 /**

@@ -1,6 +1,6 @@
 // Core functionality
 import { ok, err, Result } from './core/result';
-import { Schema, ValidationOptions, PartialSchema } from './core/schema';
+import { Schema, CustomSchema, ValidationOptions, PartialSchema } from './core/schema';
 import { ValidationError } from './core/errors';
 import { biMap } from './core/bimap';
 import { addVersionedToSchema } from './core/versioned';
@@ -24,29 +24,12 @@ import {
 // Type schemas
 import { string } from './types/string';
 import { number } from './types/number';
+import { boolean } from './types/boolean';
 import { object } from './types/object';
 import { array } from './types/array';
 import { createEnum } from './types/enum';
-
-// Create a boolean schema function
-const boolean = (): Schema<boolean> => {
-  return new CustomSchema((value: unknown): Result<boolean, ValidationError> => {
-    if (typeof value === 'boolean') {
-      return ok(value);
-    }
-    return err(ValidationError.typeMismatch('boolean', value));
-  });
-};
-
-// Create a null schema function
-const nullSchema = (): Schema<null> => {
-  return new CustomSchema((value: unknown): Result<null, ValidationError> => {
-    if (value === null) {
-      return ok(null);
-    }
-    return err(ValidationError.typeMismatch('null', value));
-  });
-};
+import { nullSchema } from './types/null';
+import { any } from './types/any';
 
 // Create main schema namespace
 const s = {
@@ -58,6 +41,15 @@ const s = {
   array,
   enum: createEnum,
   null: nullSchema,
+  any: any,
+  instanceof: <T>(constructor: new (...args: any[]) => T): CustomSchema<T> => {
+    return new CustomSchema((value: unknown): Result<T, ValidationError> => {
+      if (value instanceof constructor) {
+        return ok(value);
+      }
+      return err(ValidationError.typeMismatch(constructor.name, value));
+    });
+  },
 
   // Versioning and migrations
   createVersionRegistry,
@@ -99,23 +91,6 @@ const s = {
 
 // Add versioned capability to all schemas
 addVersionedToSchema();
-
-// Custom schema implementation
-class CustomSchema<T> extends Schema<T> {
-  constructor(private readonly validator: (value: unknown) => Result<T, ValidationError>) {
-    super();
-  }
-
-  _parse(data: unknown, options: ValidationOptions): Result<T, ValidationError> {
-    return this.validator(data);
-  }
-
-  partial(): Schema<Partial<T>> {
-    // For custom schemas, we can't infer a partial type without extra info
-    // So we just return the same schema but cast it
-    return this as unknown as Schema<Partial<T>>;
-  }
-}
 
 // Export everything
 export {

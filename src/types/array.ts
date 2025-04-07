@@ -10,6 +10,7 @@ export class ArraySchema<T> extends Schema<T[]> {
   private readonly _minItems?: number;
   private readonly _maxItems?: number;
   private readonly _uniqueItems: boolean = false;
+  private readonly _defaultValue?: T[];
   
   constructor(itemSchema: Schema<T>, options: ArraySchemaOptions = {}) {
     super();
@@ -17,6 +18,7 @@ export class ArraySchema<T> extends Schema<T[]> {
     this._minItems = options.minItems;
     this._maxItems = options.maxItems;
     this._uniqueItems = options.uniqueItems || false;
+    this._defaultValue = options.default as T[] | undefined;
   }
   
   /**
@@ -38,6 +40,16 @@ export class ArraySchema<T> extends Schema<T[]> {
       maxItems: count,
     });
   }
+
+  /**
+   * Set a default value for when the array is undefined
+   */
+  default(defaultValue: T[]): ArraySchema<T> {
+    return new ArraySchema(this._itemSchema, {
+      ...this._getOptions(),
+      default: [...defaultValue], // Copie pour éviter les références partagées
+    });
+  }
   
   /**
    * Set uniqueness validation
@@ -48,7 +60,6 @@ export class ArraySchema<T> extends Schema<T[]> {
       uniqueItems: true,
     });
   }
-  
 
   /**
    * Generate a partial schema
@@ -80,6 +91,7 @@ export class ArraySchema<T> extends Schema<T[]> {
       minItems: this._minItems,
       maxItems: this._maxItems,
       uniqueItems: this._uniqueItems,
+      default: this._defaultValue,
     };
   }
   
@@ -88,74 +100,111 @@ export class ArraySchema<T> extends Schema<T[]> {
    */
   _parse(data: unknown, options: ValidationOptions): Result<T[], ValidationError> {
     const path = options.path || [];
-    
+
+    // Handle undefined with default value
+    if (data === undefined) {
+      if (this._defaultValue !== undefined) {
+        return ok([...this._defaultValue]); // Retourner une copie de la valeur par défaut
+      }
+
+      return err(ValidationError.typeMismatch('array', data, path));
+    }
+
+    // Handle null (si vous voulez traiter null comme undefined)
+    if (data === null) {
+      if (this._defaultValue !== undefined) {
+        return ok([...this._defaultValue]);
+      }
+
+      return err(ValidationError.typeMismatch('array', data, path));
+    }
+
     // Type check
     if (!Array.isArray(data)) {
       return err(ValidationError.typeMismatch('array', data, path));
     }
-    
-    const array = data;
+
+    const arr = data as unknown[];
+    const result: T[] = [];
     const issues: ValidationIssue[] = [];
-    
+
     // Length validations
-    if (this._minItems !== undefined && array.length < this._minItems) {
+    if (this._minItems !== undefined && arr.length < this._minItems) {
       issues.push(this.issue(
         `Array must contain at least ${this._minItems} item(s)`,
-        'array.min_items',
+        'array.min_length',
         path,
-        { minItems: this._minItems, actual: array.length }
+        { min: this._minItems, actual: arr.length }
       ));
     }
-    
-    if (this._maxItems !== undefined && array.length > this._maxItems) {
+
+    if (this._maxItems !== undefined && arr.length > this._maxItems) {
       issues.push(this.issue(
         `Array must contain at most ${this._maxItems} item(s)`,
-        'array.max_items',
+        'array.max_length',
         path,
-        { maxItems: this._maxItems, actual: array.length }
+        { max: this._maxItems, actual: arr.length }
       ));
     }
-    
+
     // Uniqueness validation
-    if (this._uniqueItems && new Set(array).size !== array.length) {
-      issues.push(this.issue(
-        'Array items must be unique',
-        'array.unique',
-        path
-      ));
+    if (this._uniqueItems && arr.length > 1) {
+      const seen = new Set();
+      const duplicates = [];
+
+      for (let i = 0; i < arr.length; i++) {
+        // Pour les types primitifs, nous pouvons utiliser Set directement
+        if (typeof arr[i] === 'string' || typeof arr[i] === 'number' || typeof arr[i] === 'boolean') {
+          if (seen.has(arr[i])) {
+            duplicates.push(i);
+          } else {
+            seen.add(arr[i]);
+          }
+        } else {
+          // Pour les objets, nous devrions utiliser une méthode d'égalité plus sophistiquée
+          // mais pour les tests de base, utilisons la sérialisation JSON
+          const strValue = JSON.stringify(arr[i]);
+          if (seen.has(strValue)) {
+            duplicates.push(i);
+          } else {
+            seen.add(strValue);
+          }
+        }
+      }
+
+      if (duplicates.length > 0) {
+        issues.push(this.issue(
+          `Array items must be unique, found duplicates at positions: ${duplicates.join(', ')}`,
+          'array.unique',
+          path,
+          { duplicates }
+        ));
+      }
     }
-    
-    // Abort early if needed
-    if (options.abortEarly && issues.length > 0) {
-      return err(this.validationError(issues));
-    }
-    
-    // Validate each item in the array
-    const result: T[] = [];
-    
-    for (let i = 0; i < array.length; i++) {
+
+    // Validate items
+    for (let i = 0; i < arr.length; i++) {
       const itemPath = [...path, i.toString()];
-      const itemResult = this._itemSchema.safeParse(array[i], {
+      const itemResult = this._itemSchema.safeParse(arr[i], {
         ...options,
         path: itemPath,
       });
-      
+
       if (itemResult.isOk()) {
         result.push(itemResult.unwrap());
       } else {
         issues.push(...itemResult.unwrapErr().issues);
-        
-        // Abort early if requested
-        if (options.abortEarly && issues.length > 0) {
-          break;
+
+        if (options.abortEarly) {
+          return err(this.validationError(issues));
         }
       }
     }
-    
+
     if (issues.length > 0) {
       return err(this.validationError(issues));
     }
-    
+
     return ok(result);
   }
 }
@@ -195,10 +244,12 @@ class OptionalArraySchema<T> extends Schema<T[] | undefined> {
 /**
  * Options for array schema
  */
-export interface ArraySchemaOptions {
+export interface ArraySchemaOptions<T = unknown> {
   minItems?: number;
   maxItems?: number;
   uniqueItems?: boolean;
+  default?: T[];
+  stripUnknown?: boolean;
 }
 
 /**

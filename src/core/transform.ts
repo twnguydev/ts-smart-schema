@@ -23,18 +23,28 @@ export class TransformSchema<TInput, TOutput> extends Schema<TOutput> {
 
     // If base validation fails, return error
     if (baseResult.isErr()) {
-      // Conversion explicite du type d'erreur pour satisfaire TypeScript
       return err(baseResult.unwrapErr());
     }
 
     // Apply transformation
-    const transformedValue = this.transformer(baseResult.unwrap());
+    const baseValue = baseResult.unwrap();
+    const transformedValue = this.transformer(baseValue);
 
     // Handle case where transformer returns a Result
     if (transformedValue instanceof Object &&
       '_tag' in transformedValue &&
       (transformedValue._tag === 'Ok' || transformedValue._tag === 'Err')) {
       return transformedValue as Result<TOutput, ValidationError>;
+    }
+
+    // Handle NaN values for number transformations
+    if (typeof transformedValue === 'number' && isNaN(transformedValue)) {
+      return err(new ValidationError([{
+        path: options.path || [],
+        message: `Failed to transform value "${String(data)}" to a valid number`,
+        code: 'transform.invalid_number',
+        params: { value: data }
+      }]));
     }
 
     // Otherwise, wrap as Ok

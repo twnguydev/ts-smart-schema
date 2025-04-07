@@ -13,6 +13,7 @@ export class NumberSchema extends Schema<number> {
   private readonly _negative: boolean = false;
   private readonly _multipleOf?: number;
   private readonly _optional: boolean = false;
+  private readonly _default?: number;
   
   constructor(options: NumberSchemaOptions = {}) {
     super();
@@ -23,6 +24,7 @@ export class NumberSchema extends Schema<number> {
     this._negative = options.negative || false;
     this._multipleOf = options.multipleOf;
     this._optional = options.optional || false;
+    this._default = options.default;
   }
 
   /**
@@ -42,6 +44,16 @@ export class NumberSchema extends Schema<number> {
     return new NumberSchema({
       ...this._getOptions(),
       max: value,
+    });
+  }
+
+  /**
+   * Set a default value for the number
+   */
+  default(value: number): NumberSchema {
+    return new NumberSchema({
+      ...this._getOptions(),
+      default: value,
     });
   }
 
@@ -116,6 +128,11 @@ export class NumberSchema extends Schema<number> {
   _parse(data: unknown, options: ValidationOptions): Result<number, ValidationError> {
     const path = options.path || [];
 
+    // Si la valeur est undefined et qu'il y a une valeur par défaut, utilisez-la
+    if (data === undefined && this._default !== undefined) {
+      return ok(this._default);
+    }
+  
     // Type check
     if (typeof data !== 'number' || Number.isNaN(data)) {
       return err(ValidationError.typeMismatch('number', data, path));
@@ -244,6 +261,7 @@ export interface NumberSchemaOptions {
   negative?: boolean;
   multipleOf?: number;
   optional?: boolean;
+  default?: number;
 }
 
 /**

@@ -73,9 +73,9 @@ describe('Transformations de données', () => {
   describe('Préprocessing et postprocessing', () => {
     it('prétraite les données avant validation', () => {
       const TrimmedStringSchema = s.string()
-        .preprocess((value) => typeof value === 'string' ? value.trim() : value)
-        .min(3);
-
+      .min(3)
+      .preprocess((value) => typeof value === 'string' ? value.trim() : value);
+    
       expect(TrimmedStringSchema.parse('   hello   ')).toBe('hello');
       expect(() => TrimmedStringSchema.parse('   hi   ')).toThrow();
     });

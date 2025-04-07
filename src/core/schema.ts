@@ -160,15 +160,32 @@ export abstract class Schema<T> implements SchemaType<T> {
   /**
    * Transform the output of this schema
    */
-  transform<U>(
-    transformer: (value: T) => U | Result<U, ValidationError>,
-    reverseTransformer?: (value: U) => T | Result<T, ValidationError>
-  ): Schema<U> {
-    return new (require('./transform').TransformSchema)(
-      this,
-      transformer,
-      reverseTransformer
-    );
+  transform<U>(transformer: (value: T) => U): Schema<U> {
+    const baseSchema = this;
+    return new CustomSchema<U>((data: unknown): Result<U, ValidationError> => {
+      // First validate using base schema
+      const result = baseSchema._parse(data, { path: [] });
+
+      if (result.isErr()) {
+        return err(result.unwrapErr());
+      }
+
+      // Apply transformation
+      const value = result.unwrap();
+      const transformed = transformer(value);
+
+      // Handle NaN for number transformations
+      if (typeof transformed === 'number' && isNaN(transformed)) {
+        return err(new ValidationError([{
+          path: [],
+          message: `Failed to transform value "${String(data)}" to a valid number`,
+          code: 'transform.invalid_number',
+          params: { value: data }
+        }]));
+      }
+
+      return ok(transformed);
+    });
   }
     
   /**
@@ -399,6 +416,25 @@ export abstract class Schema<T> implements SchemaType<T> {
    */
   apply<U extends T>(rules: RuleSet<T, U>): Schema<U> {
     return rules.apply(this);
+  }
+}
+
+/**
+ * Custom schema for direct validation functions
+ */
+export class CustomSchema<T> extends Schema<T> {
+  constructor(private readonly validator: (value: unknown) => Result<T, ValidationError>) {
+    super();
+  }
+
+  _parse(data: unknown, options: ValidationOptions): Result<T, ValidationError> {
+    return this.validator(data);
+  }
+
+  partial(): Schema<Partial<T>> {
+    // For custom schemas, we can't infer a partial type without extra info
+    // So we just return the same schema but cast it
+    return this as unknown as Schema<Partial<T>>;
   }
 }
 

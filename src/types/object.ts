@@ -46,9 +46,15 @@ export class ObjectSchema<T extends Record<string, any>> extends Schema<T> {
    * Set default values for properties
    */
   default<K extends keyof T>(key: K, value: T[K]): ObjectSchema<T> {
+    // Obtenir la liste actuelle des propriétés requises
+    const required = new Set(this._required);
+
+    // Rendre la propriété optionnelle en la supprimant de l'ensemble des propriétés requises
+    required.delete(key as string);
+
     return new ObjectSchema<T>({
       shape: this._shape,
-      required: Array.from(this._required),
+      required: Array.from(required),
       defaults: {
         ...this._defaults,
         [key]: value,
@@ -60,15 +66,24 @@ export class ObjectSchema<T extends Record<string, any>> extends Schema<T> {
    * Generate a partial schema where all properties are optional
    */
   partial(): PartialSchema<T> {
-    const shape = this._shape;
+    // Transforme chaque propriété du schéma en version partielle
+    const partialShape: Record<string, Schema<any>> = {};
+
+    for (const [key, schema] of Object.entries(this._shape)) {
+      partialShape[key] = schema.partial();
+    }
+
+    // Sauvegardons les defaults ici pour y accéder dans les fonctions internes
     const defaults = this._defaults;
 
+    // Créer un schéma partiel de base
     const partialSchema = new ObjectSchema<Partial<T>>({
-      shape: shape,
-      required: [], // No required fields
+      shape: partialShape,
+      required: [], // Aucune propriété requise
       defaults: defaults,
     });
 
+    // Ajout de la méthode required au schéma partiel
     return Object.assign(partialSchema, {
       required<K extends keyof T>(keys: K | K[]): PartialSchema<T> {
         const keysArray = Array.isArray(keys) ? keys : [keys];
@@ -78,24 +93,25 @@ export class ObjectSchema<T extends Record<string, any>> extends Schema<T> {
           required.add(key as string);
         }
 
-        const newPartialSchema = new ObjectSchema<Partial<T>>({
-          shape: shape,
+        const newSchema = new ObjectSchema<Partial<T>>({
+          shape: partialShape,
           required: Array.from(required),
           defaults: defaults,
         });
 
-        return Object.assign(newPartialSchema, {
-          required: function <K extends keyof T>(keys: K | K[]): PartialSchema<T> {
-            const keysArray = Array.isArray(keys) ? keys : [keys];
-            const newRequired = new Set(required);
+        // Ajouter à nouveau la méthode required
+        return Object.assign(newSchema, {
+          required<K extends keyof T>(moreKeys: K | K[]): PartialSchema<T> {
+            const moreKeysArray = Array.isArray(moreKeys) ? moreKeys : [moreKeys];
+            const combinedRequired = new Set<string>(required);
 
-            for (const key of keysArray) {
-              newRequired.add(key as string);
+            for (const key of moreKeysArray) {
+              combinedRequired.add(key as string);
             }
 
             return new ObjectSchema<Partial<T>>({
-              shape: shape,
-              required: Array.from(newRequired),
+              shape: partialShape,
+              required: Array.from(combinedRequired),
               defaults: defaults,
             }) as PartialSchema<T>;
           }
@@ -168,20 +184,74 @@ export class ObjectSchema<T extends Record<string, any>> extends Schema<T> {
           }
         }
       } else if (this._required.has(key)) {
-        // Missing required property
-        issues.push(this.issue(
-          `Required property missing`,
-          'object.required',
-          propPath
-        ));
+        // Si la propriété est requise mais absente
+        if (useDefaults && key in this._defaults) {
+          // Appliquer la valeur par défaut explicite
+          result[key] = this._defaults[key];
+        } else {
+          // Essayer d'obtenir une valeur par défaut du schéma
+          let hasDefault = false;
 
-        // Abort early if requested
-        if (options.abortEarly && issues.length > 0) {
-          return err(this.validationError(issues));
+          if (useDefaults) {
+            try {
+              // Tenter d'obtenir une valeur par défaut en validant undefined
+              const defaultResult = schema.safeParse(undefined, {
+                ...options,
+                path: propPath,
+                defaults: true
+              });
+
+              if (defaultResult.isOk()) {
+                const defaultValue = defaultResult.unwrap();
+                if (defaultValue !== undefined) {
+                  result[key] = defaultValue;
+                  hasDefault = true;
+                }
+              }
+            } catch (e) {
+              // Ignorer les erreurs lors de la tentative d'obtention d'une valeur par défaut
+            }
+          }
+
+          // Si nous n'avons pas pu obtenir de valeur par défaut, signaler l'erreur
+          if (!hasDefault) {
+            issues.push(this.issue(
+              `Required property missing`,
+              'object.required',
+              propPath
+            ));
+
+            // Abort early if requested
+            if (options.abortEarly && issues.length > 0) {
+              return err(this.validationError(issues));
+            }
+          }
         }
-      } else if (useDefaults && key in this._defaults) {
-        // Apply default value
-        result[key] = this._defaults[key];
+      } else if (useDefaults) {
+        // Propriété optionnelle absente
+        if (key in this._defaults) {
+          // Appliquer la valeur par défaut explicite de l'objet
+          result[key] = this._defaults[key];
+        } else {
+          // Pour tous les schémas (pas seulement récursifs), essayer d'obtenir une valeur par défaut
+          try {
+            // Tenter d'obtenir une valeur par défaut du schéma
+            const defaultResult = schema.safeParse(undefined, {
+              ...options,
+              path: propPath,
+              defaults: true
+            });
+
+            if (defaultResult.isOk()) {
+              const defaultValue = defaultResult.unwrap();
+              if (defaultValue !== undefined) {
+                result[key] = defaultValue;
+              }
+            }
+          } catch (e) {
+            // Ignorer les erreurs lors de la tentative de création de valeur par défaut
+          }
+        }
       }
     }
 
@@ -195,10 +265,8 @@ export class ObjectSchema<T extends Record<string, any>> extends Schema<T> {
     } else {
       // Only include known properties when stripUnknown is true
       for (const key of Object.keys(value)) {
-        if (key in this._shape) {
-          if (!(key in result)) {
-            result[key] = value[key];
-          }
+        if (key in this._shape && !(key in result)) {
+          result[key] = value[key];
         }
       }
     }

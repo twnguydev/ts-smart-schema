@@ -101,10 +101,7 @@ describe('Unions et intersections de schémas', () => {
       });
 
       // Pour l'exemple, supposons que intersection existe
-      const EmployeeWithPersonSchema = s.intersection([
-        PersonSchema,
-        EmployeeSchema,
-      ]);
+      const EmployeeWithPersonSchema = s.intersection(PersonSchema, EmployeeSchema);
 
       const validEmployeeWithPerson = {
         name: 'John',
@@ -132,30 +129,38 @@ describe('Unions et intersections de schémas', () => {
         value: s.string(),
         children: s.lazy(() => s.array(TreeNodeSchema).default([])),
       });
-
+    
+      // Mise à jour de l'arbre valide pour inclure explicitement les tableaux vides
       const validTree = {
         value: 'root',
         children: [
           {
             value: 'child1',
             children: [
-              { value: 'grandchild1' },
-              { value: 'grandchild2' },
+              { 
+                value: 'grandchild1',
+                children: []  // Ajout explicite du tableau vide
+              },
+              { 
+                value: 'grandchild2',
+                children: []  // Ajout explicite du tableau vide  
+              },
             ],
           },
           {
             value: 'child2',
+            children: []  // Ajout explicite du tableau vide
           },
         ],
       };
-
+    
       expect(TreeNodeSchema.parse(validTree)).toEqual(validTree);
-
+    
       // Tester les valeurs par défaut pour les enfants
       const nodeWithoutChildren = {
         value: 'leaf',
       };
-
+    
       expect(TreeNodeSchema.parse(nodeWithoutChildren)).toEqual({
         value: 'leaf',
         children: [],

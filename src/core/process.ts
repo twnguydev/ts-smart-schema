@@ -17,10 +17,7 @@ export class PreprocessSchema<T> extends Schema<T> {
    * Internal parse method
    */
   _parse(data: unknown, options: ValidationOptions): Result<T, ValidationError> {
-    // Apply preprocessing
     const processedData = this.preprocessor(data);
-    
-    // Validate with base schema
     return this.baseSchema._parse(processedData, options);
   }
   
